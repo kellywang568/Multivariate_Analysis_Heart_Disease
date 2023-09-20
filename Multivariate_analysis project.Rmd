@@ -1,0 +1,251 @@
+---
+title: "Cardiovascular Disease Dataset"
+output: pdf_document
+date: "2023-05-02"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(car)
+library(leaps)
+library(lubridate)
+library(rvest)
+library(olsrr)
+library(corrplot)
+library(leaps)
+library(MASS)
+
+
+# For Cluster analysis 
+##library(aplpack)
+library(fpc)
+library(cluster)
+library(ape)
+library(amap)
+
+#source("http://www.reuningscherer.net/s&ds230/Rfuncs/regJDRS.txt")
+```
+
+## Data Cleaning
+```{r}
+getwd()
+heart <- read.csv("/Users/kw782/Desktop/Sem 2, Year 1/663- Multivariate Stats/HW/Final Project/heart_data.csv")
+
+# omit columns with NA
+heart <- na.omit(heart)
+
+head(heart)
+
+dim(heart)
+
+# get rid of unnecessary id and index columns
+heart <- heart[ , !names(heart) %in% c("id", "index")]
+
+# convert age from an integer (days) to a decimal (years)
+heart$age <- heart$age / 365
+
+# convert gender from an integer (1 = male, 2 = female) to a string 
+heart$gender <- ifelse(heart$gender == 1, "M", "F")
+
+# round age to the nearest integer
+heart$age <- round(heart$age, 0)
+
+# convert smoking behavior, alcohol use, physical activity, and presence of 
+# cardiovascular disease from an integer (0 = no, 1 = yes) to a string 
+heart$smoke <- ifelse(heart$smoke == 0, "N", "Y")
+heart$alco <- ifelse(heart$alco == 0, "N", "Y")
+heart$active <- ifelse(heart$active == 0, "N", "Y")
+heart$cardio <- ifelse(heart$cardio == 0, "N", "Y")
+
+# create pulse pressure
+heart$pulsePressure <- heart$ap_hi - heart$ap_lo
+
+# get rid of duplicated data
+heart <- unique(heart)
+
+# get rid of extreme/error values (for example, negative pulse pressure)
+heart <- heart[!abs(heart$pulsePressure) > 150, ]
+heart <- heart[!abs(heart$pulsePressure) < 0, ]
+
+heart <- heart[!abs(heart$ap_hi) > 400, ]
+heart <- heart[!abs(heart$ap_hi) < 0, ]
+
+heart <- heart[!abs(heart$ap_lo) > 400, ]
+heart <- heart[!abs(heart$ap_hi) < 0, ]
+
+heart <- heart[!abs(heart$height) > 200, ]
+
+dim(heart)
+
+head(heart)
+
+```
+
+
+## Cluster Analysis 
+In cluster analysis, we don't want to standardize our data if the variables have meaningful differences in units or scales. An example would be like: clustering customers based on their purchase behavior and you have variables such as "total purchase amount" and "number of purchases", standardizing the data would remove the original differences in scale between the two variables. 
+
+In this case, we want to standardize. The variables are on different scales (ie. "height" "weight" "age") and have different units, so standardizing the data can help to ensure that each variable contributes equally to the analysis. By doing so, we ensure that each variable has an equal influence on the resulting clusters, and the clusters are not biased towards any particular variable.
+
+```{r}
+#one way to standardize data
+
+heart_select <- heart[, c("age", "height", "weight", "ap_hi", "ap_lo", "cholesterol", "gluc", "weight", "pulsePressure")]
+
+heart_norm <- scale(na.omit(heart_select))
+dim(heart_norm)
+#heart_norm
+```
+
+
+```{r}
+
+boxplot(heart_select, main= "Without Normalization")
+
+#after standardizing
+boxplot(heart_norm, main = "With Normalization")
+```
+
+Based off this, we chose the Manhattan distance. This is because Euclidean distance, despite being one of the most commonly used for continuous variables, it often is best used for datasets without outliers since they can influence the Euclidean distance. However, upon looking at the outliers in the visualized dataframe, we notice that even after standardizing, there are still some outliers in the dataset (ie. in the weight). 
+
+The main difference between these two distance metrics is how they account for the direction of the differences between corresponding coordinates. Euclidean distance considers both the magnitude and direction of the differences, whereas Manhattan distance only considers the magnitude. As a result, Euclidean distance tends to be more sensitive to differences in magnitude and is useful when the variables have the same scale, while Manhattan distance is more useful when variables are measured in different scales or units.The Manhattan distance would be best because it measures the distance between two points by summing the absolute differences of their coordinates.
+
+
+Before we begin, we notice that since the dimension of "heart_norm" is 65179 rows x 9 columns. This can lead to computational difficulties and make it difficult to visualize the resulting clusters.
+
+To solve for this, we perform clustering on a subset of the data. 
+
+We use the elbow technique below to find how to find the optimal number of clusters to use 
+
+
+### PCA 
+
+```{r}
+pca <- prcomp(heart_norm, scale. = TRUE, center = TRUE, rank. = min(nrow(heart_norm), ncol(heart_norm)))
+
+pc1 <- pca$x[, 1]
+pc2 <- pca$x[, 2]
+
+clusters <- kmeans(pca$x[,1:2], centers = 3)
+
+# Visualize the clusters
+plot(pc1, pc2, col = clusters$cluster, pch = 16, main = "Clusters")
+legend("topright", legend = unique(clusters$cluster), col = unique(clusters$cluster), pch = 16, title = "Clusters")
+
+```
+
+```{r}
+#Compute the within-cluster sum of squares for different values of k
+wcss <- sapply(1:10, function(k) {
+  kmeans(pca$x[,1:2], centers = k, nstart = 10, iter.max = 300)$tot.withinss
+})
+
+# Plot the within-cluster sum of squares against the number of clusters
+plot(1:10, wcss, type = "b", xlab = "Number of clusters", ylab = "Within-cluster sum of squares")
+
+
+# Identify the elbow point
+ssdiff <- c(0, diff(wcss))
+ssdiff2 <- c(0, diff(ssdiff))
+elbow <- which.max(ssdiff2) - 1
+
+# Add the elbow point to the plot
+points(elbow+1, wcss[elbow+1], col = "red", pch = 16)
+```
+
+The optimal number of clusters is 3
+
+
+
+From the graph above, the PCA allowed us to separate the data into clusters, which helps us with dimension reduction. From here, it would be easier to predict the probability of developing 
+
+
+```{r}
+#colnames(heart_norm)
+cor(pc1,heart_norm[,"age"])
+cor(pc1,heart_norm[,"height"])
+cor(pc1,heart_norm[,"weight"])
+cor(pc1,heart_norm[,"ap_hi"])
+cor(pc1,heart_norm[,"ap_lo"])
+cor(pc1,heart_norm[,"cholesterol"])
+cor(pc1,heart_norm[,"gluc"])
+cor(pc1,heart_norm[,"pulsePressure"])
+
+```
+Based off that, we decided to do a test to see the correlations of the original variables in the principal components in order to identify which variables most strongly associate with each principal component. For PC1 the highest correlations is: "Systolic blood pressure reading taken from patient" at 0.783135. This means that PC1 is most likely to be related to: "Systolic blood pressure reading taken from patient".
+
+
+For PC2, we repeat: 
+
+```{r}
+cor(pc2,heart_norm[,"age"])
+cor(pc2,heart_norm[,"height"])
+cor(pc2,heart_norm[,"weight"])
+cor(pc2,heart_norm[,"ap_hi"])
+cor(pc2,heart_norm[,"ap_lo"])
+cor(pc2,heart_norm[,"cholesterol"])
+cor(pc2,heart_norm[,"gluc"])
+cor(pc2,heart_norm[,"pulsePressure"])
+
+```
+Here, the highest correlation is: weight at 0.6012452. 
+The second principal component is most likely correlated with "weight." All in all this allows us to better visualize the principal component graph, and better understand the method in which the clusters are created. Afterwards, when we sample included dendrogram, based off that, it will be easier for us to analyze how these two principal components come into play, especially at an individual level. It seems that these two principal components, "Systolic blood pressure reading taken from patient" and "weight", are most important in determining individuals likelihood for heart disease.
+
+### Cluster Analysis Sampling
+
+In this case because they’re 65,000+ rows, we would not want to do cluster analysis on all of these rows. Because of that, we would ideally want to find a subset of that that we can then perform closer analysis on. From there we can then deduce commonalities and differences among the participants in terms of the variables.
+
+
+```{r}
+#sample a list of participants (aka observations)
+sample_rows <- sample(1:nrow(heart_norm), 20, replace = FALSE, prob = NULL)
+
+
+#get the distance matrix
+colnames(heart_norm)
+heart_norm2 <- heart_norm[sample_rows,]
+
+heart_norm2
+dist1 <- dist(heart_norm2, method = "manhattan")
+
+dim(heart_norm2)  #20 x 9- very doable
+
+
+#now do clustering use complete linkage
+clust1 <- hclust(dist1)
+
+#draw the dendrogram
+plot(clust1, labels = rownames(heart_norm2), cex = 0.6, xlab = "", ylab = "Distance", main = "Clustering of Heart Risk Factors")
+rect.hclust(clust1, k = 5)
+```
+From the dendrogram above, we notice that there are two primary groups. In the group on the left, since the first branch is a lot longer, that means that the differences on the left is a lot closer than the differences on the right. 
+
+We can deduce the similarities among the groups of participants. 
+We can note the similarities among some groups that are much lower on the y-axis, including: 
+
+(1). 42229 and 14091
+(2). 30120 and 57202
+
+If we pull out these observations and see their characteristics, we notice:
+
+```{r}
+heart_norm[c("4229","14091"),]
+```
+
+From the above, we notice a difference in age, weight, cholesterol, glucose. 
+The pulse pressure, and diastolic blood pressure reading taken from patient are identical. 
+
+```{r}
+heart_norm[c("30120","57202"),]
+```
+
+From the above, we notice a difference in age and pulse pressure. 
+The pulse ap_hi, cholesterol, and glucose are identical. 
+Even though the dendrogram cannot be used to visualize all 65,000 observed participants, it can definitely help with observing minute differences and similarities at the individual level. 
+
+
+
+
